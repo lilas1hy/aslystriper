@@ -4,8 +4,8 @@ from telethon.sessions import StringSession
 
 # ---------------------------------------------------
 # Env Variables on Render
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
+API_ID = 24534527 
+API_HASH = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 
