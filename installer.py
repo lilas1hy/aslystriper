@@ -7,7 +7,7 @@ import asyncio, os, json, time, re, logging
 import logging
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = "بهدا"
+BOT_TOKEN = ""
 
 # استفاده از API دیفالت
 api_id = 2040
