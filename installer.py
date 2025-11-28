@@ -1,239 +1,105 @@
-# installer.py — نسخه بدون‌باگ + پایدار
-
-import os, re, json, time, asyncio, logging, traceback
+import os, json, requests, asyncio
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from tinydb import TinyDB, Query
 
-# ----------------------------
-# تنظیمات
-# ----------------------------
-API_ID = int(os.environ.get("API_ID", 2040))
-API_HASH = os.environ.get("API_HASH", "b18441a1ff607e10a989891a5462e627")
+# ---------------------------------------------------
+# Env Variables on Render
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER = int(os.environ.get("OWNER_ID", 7282052302))
-DB_PATH = "users.json"
+OWNER_ID = int(os.environ.get("OWNER_ID", 0))
 
-# ----------------------------
-# تنظیم لاگ
-# ----------------------------
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Worker raw file:
+WORKER_URL = "https://raw.githubusercontent.com/lilas1hy/aslystriper/main/worker.py"
 
-# ----------------------------
-# دیتابیس
-# ----------------------------
-db = TinyDB(DB_PATH)
-users_table = db.table("users")
+DB_FILE = "users.json"
+# ---------------------------------------------------
 
-# یکنواخت‌سازی user_id ها
-def fix_uid(uid):
-    try:
-        return str(int(uid))
-    except:
-        return str(uid)
+# tiny DB
+if not os.path.exists(DB_FILE):
+    with open(DB_FILE, "w") as f:
+        json.dump({}, f)
 
-def add_user(user_id):
-    user_id = fix_uid(user_id)
-    if not users_table.contains(Query().id == user_id):
-        users_table.insert({
-            'id': user_id,
-            'try': 3,
-            'installed': False,
-            'step': None,
-            'temp_session': None,
-            'phone': None,
-            'session': None
-        })
+def load_db():
+    with open(DB_FILE, "r") as f:
+        return json.load(f)
 
-def get_user(user_id):
-    user_id = fix_uid(user_id)
-    user = users_table.get(Query().id == user_id)
-    if not user:
-        add_user(user_id)
-        user = users_table.get(Query().id == user_id)
-    return user
+def save_db(db):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f)
 
-def update_user(user_id, data: dict):
-    user_id = fix_uid(user_id)
-    users_table.update(data, Query().id == user_id)
+def add_user(uid):
+    db = load_db()
+    if str(uid) not in db:
+        db[str(uid)] = {"installed": False, "tries": 3}
+        save_db(db)
 
-# ----------------------------
-# تبدیل متن به کد
-# ----------------------------
-num_dict = {
-    "zero":"0","one":"1","two":"2","three":"3","four":"4",
-    "five":"5","six":"6","seven":"7","eight":"8","nine":"9",
-    "0":"0","1":"1","2":"2","3":"3","4":"4","5":"5","6":"6","7":"7","8":"8","9":"9"
-}
+def update_user(uid, data):
+    db = load_db()
+    db[str(uid)].update(data)
+    save_db(db)
 
-def convert_code(text):
-    code = ""
-    for word in text.strip().split():
-        if word.lower() in num_dict:
-            code += num_dict[word.lower()]
-        elif word.isdigit():
-            code += word
-    return code if code else None
+def get_user(uid):
+    db = load_db()
+    return db.get(str(uid))
 
-# ----------------------------
-# ساخت فایل کاربر
-# ----------------------------
-def create_user_file(user_id, session_string):
-    filename = f"user_{user_id}.py"
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(f'SESSION = "{session_string}"\n')
-            if os.path.exists("worker.py"):
-                with open("worker.py","r",encoding="utf-8") as wf:
-                    f.write(wf.read())
-            else:
-                f.write("# worker.py پیدا نشد\n")
-        return filename
-    except Exception as e:
-        logger.error(f"خطا در ساخت فایل کاربر: {e}")
-        return None
+# ---------------------------------------------------
 
-# ----------------------------
-# ربات
-# ----------------------------
-bot = TelegramClient('installer', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+bot = TelegramClient("installer", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-# ----------------------------
-# شروع
-# ----------------------------
 @bot.on(events.NewMessage(pattern="/start"))
-async def start_handler(event):
-    user_id = fix_uid(event.sender_id)
-    add_user(user_id)
-    user = get_user(user_id)
+async def start_cmd(event):
+    uid = event.sender_id
+    add_user(uid)
+    user = get_user(uid)
 
     if user["installed"]:
-        return await event.reply("سورس قبلاً نصب شده حاج ✅")
+        await event.reply("حاج قبلاً نصب شده بودی ✔️")
+    else:
+        await event.reply("پسورد رو بفرست حاج بخ:")
 
-    await event.reply("پسوردتو وارد کن حاج")
-
-# ----------------------------
-# هندل همه پیام‌ها
-# ----------------------------
-@bot.on(events.NewMessage())
-async def all_messages(event):
-    user_id = fix_uid(event.sender_id)
-
-    if not users_table.contains(Query().id == user_id):
-        return
-
-    user = get_user(user_id)
+@bot.on(events.NewMessage(func=lambda e: True))
+async def password_handler(event):
+    uid = event.sender_id
+    user = get_user(uid)
     text = event.text.strip()
 
-    # ----------------------------
-    # مرحله 1: پسورد
-    # ----------------------------
-    if user["step"] is None:
-        if text == "J123J":
-            update_user(user_id, {"step": "phone"})
-            return await event.reply("پسورد درست بود حاج ✅\nحالا شمارتو بده")
-        else:
-            tries = user["try"] - 1
-            update_user(user_id, {"try": tries})
-            if tries <= 0:
-                return await event.reply("بُن شدی حاج 😭")
-            return await event.reply(f"پسورد اشتباه حاج 😭 {tries} فرصت موند")
-
-    # ----------------------------
-    # مرحله 2: شماره
-    # ----------------------------
-    if user["step"] == "phone":
-        if not re.match(r"^\+\d{10,15}$", text):
-            return await event.reply("شماره اشتباه حاج 😭 با + بزن")
-
-        try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            await client.connect()
-            await client.send_code_request(text)
-            update_user(user_id, {
-                "step": "code",
-                "phone": text,
-                "temp_session": client.session.save()
-            })
-            return await event.reply("کد ارسال شد حاج\nکد رو وارد کن")
-        except Exception as e:
-            logger.error(str(e))
-            return await event.reply("خطا در ارسال کد حاج 😭")
-        finally:
-            try: await client.disconnect()
-            except: pass
-
-    # ----------------------------
-    # مرحله 3: کد تایید
-    # ----------------------------
-    if user["step"] == "code":
-        code = convert_code(text)
-        if not code or len(code) < 4:
-            return await event.reply("کد نامعتبر حاج 😭 دوباره بزن")
-
-        try:
-            client = TelegramClient(StringSession(user["temp_session"]), API_ID, API_HASH)
-            await client.connect()
-            await client.sign_in(user["phone"], code)
-            session = client.session.save()
-        except Exception as e:
-            if "password" in str(e).lower():
-                update_user(user_id, {"step": "2fa"})
-                return await event.reply("رمز دوم داره حاج 😭 رمز رو بده")
-            return await event.reply("کد غلط حاج 😭")
-        finally:
-            try: await client.disconnect()
-            except: pass
-
-        filename = create_user_file(user_id, session)
-        update_user(user_id, {"installed": True, "session": session})
-
-        await event.reply("نصب کامل شد حاج ✅")
-        await event.reply(file=filename)
-        await asyncio.sleep(1)
-        try: os.remove(filename)
-        except: pass
+    # اگر قبلاً نصب شده
+    if user["installed"]:
         return
 
-    # ----------------------------
-    # مرحله 4: رمز دوم
-    # ----------------------------
-    if user["step"] == "2fa":
+    # پسورد درست
+    if text == "J123J":
         try:
-            client = TelegramClient(StringSession(user["temp_session"]), API_ID, API_HASH)
-            await client.connect()
-            await client.sign_in(password=text)
-            session = client.session.save()
-        except:
-            return await event.reply("رمز دوم اشتباه حاج 😭")
-        finally:
-            try: await client.disconnect()
-            except: pass
+            await event.reply("در حال دانلود Worker حاج صبر…")
 
-        filename = create_user_file(user_id, session)
-        update_user(user_id, {"installed": True, "session": session})
+            r = requests.get(WORKER_URL)
+            r.raise_for_status()
+            code = r.text  # Worker code
 
-        await event.reply("نصب کامل شد حاج ✅")
-        await event.reply(file=filename)
-        await asyncio.sleep(1)
-        try: os.remove(filename)
-        except: pass
+            session = StringSession()
+            client = TelegramClient(session, API_ID, API_HASH)
+            await client.start()
 
+            # اجرای Worker روی اکانت کاربر
+            exec(code, {"client": client})
 
-# ----------------------------
-# دستورات ادمین
-# ----------------------------
-@bot.on(events.NewMessage(pattern=r"^/stats$"))
-async def stats_handler(event):
-    if event.sender_id != OWNER:
+            update_user(uid, {"installed": True})
+            await event.reply("Worker نصب شد روی اکانتت ✔️🔥")
+
+        except Exception as e:
+            await event.reply(f"خطا در نصب Worker:\n{e}")
         return
-    total = len(users_table)
-    installed = len([u for u in users_table.all() if u.get("installed")])
-    await event.reply(f"کاربرها: {total}\nنصب‌شده‌ها: {installed} حاج")
 
-# ----------------------------
-# شروع ربات
-# ----------------------------
-print("ربات نصب‌کننده آماده‌ست حاج...")
+    # پسورد غلط
+    user["tries"] -= 1
+    update_user(uid, {"tries": user["tries"]})
+
+    if user["tries"] <= 0:
+        await event.reply("فرصت‌هات تموم شد حاج 😭")
+    else:
+        await event.reply(f"غلطه حاج، {user['tries']} فرصت داری 😓")
+
+
+print("Installer Running…")
 bot.run_until_disconnected()
