@@ -4,8 +4,8 @@ from telethon.sessions import StringSession
 import asyncio, os, json, time, re, logging
 
 # تنظیم لاگ برای دیباگ بهتر
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(name)
+import logging
+logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = "بهدا"
 
